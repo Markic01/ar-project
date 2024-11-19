@@ -68,6 +68,8 @@ private:
     int _maxTries;
     int _maxSteps;
     int _numVars;
+    bool _useWalk;
+    double _threshold;
     // map atoms to clauses that they appear in
     vector<vector<int>> _variableToClauses;
     vector<int> _gain;
@@ -129,7 +131,7 @@ private:
         return val;
     }
 
-    Atom chooseVar() const {
+    Atom chooseVarGain() const {
         Atom max = 1;
         for (Atom i = 2; i <= _numVars; ++i) {
             if (_gain[i] > _gain[max]) {
@@ -138,6 +140,21 @@ private:
         }
 
         return max;
+    }
+
+    Atom chooseRandomVar() const {
+        std::vector<int> unsatisfiedClauses;
+
+        for(int i = 0; i < _formula.size(); ++i) {
+            if (_trueLiteralsCount[i] == 0) {
+                unsatisfiedClauses.push_back(i);
+            }
+        }
+
+        int randomIndex = rand() % unsatisfiedClauses.size();
+        Clause c = _formula[randomIndex];
+        randomIndex = rand() % c.size();
+        return abs(c[randomIndex]);
     }
 
     void flipAtom(const Atom a, vector<bool>& val) {
@@ -208,9 +225,11 @@ private:
 public:
     GSAT(const int maxTries, const int maxSteps) : _maxTries(maxTries), _maxSteps(maxSteps) {}
 
-    void setFormula(const Formula& formula, const int numVars) {
+    void setFormula(const Formula& formula, const int numVars, const bool useWalk = true, const double threshold = 0.05) {
         _formula = formula;
         _numVars = numVars;
+        _useWalk = useWalk;
+        _threshold = threshold;
         _variableToClauses.resize(numVars + 1);
         _gain.resize(numVars + 1, 0);
         _trueLiteralsCount.resize(formula.size(), 0);
@@ -227,16 +246,24 @@ public:
         }
     }
 
+    Atom chooseVarToFlip() const {
+        if (_useWalk && (rand() / double(RAND_MAX) < _threshold)) {
+            return chooseRandomVar();
+        }
+
+        return chooseVarGain();
+    }
+
     optional<Valuation> solve() {
         Valuation val;
+        Atom atom;
         for(int i = 0; i < _maxTries; ++i) {
             val = initialize();
             for(int j = 0; j < _maxSteps; ++j) {
                 if(isSatisfied(_formula, val)) {
                     return val;
                 }
-
-                Atom atom = chooseVar();
+                Atom atom = chooseVarToFlip();
                 flipAtom(atom, val);
             }
         }
