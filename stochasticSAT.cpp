@@ -22,6 +22,9 @@ int skipSpaces(istream& istr) {
     return c;
 }
 
+// Code retrieved from: https://poincare.matf.bg.ac.rs/~milan.bankovic/preuzimanje/ar/sat.zip
+// Author: Milan Bankovic
+// Retrieved on: 29.11.2024.
 bool readDIMACS(Formula& f, unsigned& numVars, istream& istr) {
     unsigned numClauses;
     int c;
