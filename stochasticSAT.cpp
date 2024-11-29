@@ -29,13 +29,13 @@ bool readDIMACS(Formula& f, unsigned& numVars, istream& istr) {
     while((c = skipSpaces(istr)) == 'c')
     skipRestOfLine(istr);
 
-    if(c != 'p') {
+    if (c != 'p') {
         return false;
     }
     else {
         string s;
         istr >> s;
-        if(s != "cnf") {
+        if (s != "cnf") {
             return false;
         }
 
@@ -43,7 +43,7 @@ bool readDIMACS(Formula& f, unsigned& numVars, istream& istr) {
         istr >> numClauses;
     }
 
-    for(unsigned i = 0; i < numClauses; ++i) {
+    for (unsigned i = 0; i < numClauses; ++i) {
         Clause c;
         int n;
         istr >> n; 
@@ -52,7 +52,7 @@ bool readDIMACS(Formula& f, unsigned& numVars, istream& istr) {
             istr >> n;
         }
 
-        if(istr.eof() || istr.fail()) {
+        if (istr.eof() || istr.fail()) {
             return false;
         }
 
@@ -62,7 +62,7 @@ bool readDIMACS(Formula& f, unsigned& numVars, istream& istr) {
     return true;
 }
 
-class GSAT {
+class StochasticSAT {
 private:
     Formula _formula;
     int _maxTries;
@@ -73,6 +73,7 @@ private:
     // map atoms to clauses that they appear in
     vector<vector<int>> _variableToClauses;
     vector<int> _gain;
+    vector<int> _breakCount;
     // count how many literals are true in a clause
     vector<int> _trueLiteralsCount;
 
@@ -93,7 +94,12 @@ private:
         }
 
         fill(_trueLiteralsCount.begin(), _trueLiteralsCount.end(), 0);
-        fill(_gain.begin(), _gain.end(), 0);
+        if (_useWalk) {
+            fill(_breakCount.begin(), _breakCount.end(), 0);
+        }
+        else {
+            fill(_gain.begin(), _gain.end(), 0);
+        }
 
         for (int i = 0; i < _formula.size(); ++i) {
             for (const Literal l : _formula[i]) {
@@ -110,25 +116,68 @@ private:
                     continue;
                 }
 
-                if (j < 0 && val[i] && _trueLiteralsCount[-j - 1] == 0) {
+                if (j < 0 && val[i] && _trueLiteralsCount[-j - 1] == 0 && !_useWalk) {
                     ++_gain[i];
                 }
 
                 if (j < 0 && !val[i] && _trueLiteralsCount[-j - 1] == 1) {
-                    --_gain[i];
+                    if (_useWalk) {
+                        ++_breakCount[i];
+                    }
+                    else {
+                        --_gain[i];
+                    }
                 }
 
                 if (j > 0 && val[i] && _trueLiteralsCount[j - 1] == 1) {
-                    --_gain[i];
+                    if (_useWalk) {
+                        ++_breakCount[i];
+                    }
+                    else {
+                        --_gain[i];
+                    }
                 }
 
-                if (j > 0 && !val[i] && _trueLiteralsCount[j - 1] == 0) {
+                if (j > 0 && !val[i] && _trueLiteralsCount[j - 1] == 0 && !_useWalk) {
                     ++_gain[i];
                 }
             }
         }
 
         return val;
+    }
+
+    Atom chooseVarBreak() const {
+        std::vector<int> unsatisfiedClauses;
+
+        for (int i = 0; i < _formula.size(); ++i) {
+            if (_trueLiteralsCount[i] == 0) {
+                unsatisfiedClauses.push_back(i);
+            }
+        }
+
+        int randomIndex = rand() % unsatisfiedClauses.size();
+        Clause c = _formula[randomIndex];
+
+        Atom min = 1;
+
+        for (Atom i = 1; i <= _numVars; ++i) {
+            if (_breakCount[i] == 0) {
+                return i;
+            }
+            
+            if (_breakCount[i] < _breakCount[min]) {
+                min = i;
+            }
+        }
+
+        if (rand() / double(RAND_MAX) < _threshold) {
+            int randomIndex = rand() % c.size();
+            return abs(c[randomIndex]);
+        }
+        else {
+            return min;
+        }
     }
 
     Atom chooseVarGain() const {
@@ -145,7 +194,7 @@ private:
     Atom chooseRandomVar() const {
         std::vector<int> unsatisfiedClauses;
 
-        for(int i = 0; i < _formula.size(); ++i) {
+        for (int i = 0; i < _formula.size(); ++i) {
             if (_trueLiteralsCount[i] == 0) {
                 unsatisfiedClauses.push_back(i);
             }
@@ -175,12 +224,17 @@ private:
 
             ind = abs(ind) - 1;
             if (_trueLiteralsCount[ind] == 1 && trueLiteralsBefore == 0) {
-                // other literals in this clause now don't gain anything when flipping
-                for (Literal l : _formula[ind]) {
-                    --_gain[abs(l)];
+                if (_useWalk) {
+                    ++_breakCount[a];
                 }
-                // not only the flipped literal doesn't gain anything but it also sets current clause to unsatisfied
-                --_gain[a];
+                else {
+                    // other literals in this clause now don't gain anything when flipping
+                    for (Literal l : _formula[ind]) {
+                        --_gain[abs(l)];
+                    }
+                    // not only the flipped literal doesn't gain anything but it also sets current clause to unsatisfied
+                    --_gain[a];
+                }
             }
 
             if (_trueLiteralsCount[ind] == 1 && trueLiteralsBefore == 2) {
@@ -191,7 +245,12 @@ private:
 
                     if ((l < 0 && !val[abs(l)]) || (l > 0 && val[l])) {
                         // the literal that is left positive, when flipped leaves the clause unsatisfied
-                        --_gain[abs(l)];
+                        if (_useWalk) {
+                            ++_breakCount[abs(l)];
+                        }
+                        else {
+                            --_gain[abs(l)];
+                        }
                         break;
                     }
                 }
@@ -204,7 +263,12 @@ private:
                     }
 
                     if ((l < 0 && !val[abs(l)]) || (l > 0 && val[l])) {
-                        ++_gain[abs(l)];
+                        if (_useWalk) {
+                            --_breakCount[abs(l)];
+                        }
+                        else {
+                            ++_gain[abs(l)];
+                        }
                         // the literal that was positive alone is now not leaving the clause unsatisfied
                         break;
                     }
@@ -212,18 +276,23 @@ private:
             }
 
             if (_trueLiteralsCount[ind] == 0 && trueLiteralsBefore == 1) {
-                for (Literal l : _formula[ind]) {
-                    // all literals when flipped, make clause satisfied
-                    ++_gain[abs(l)];
+                if (_useWalk) {
+                    --_breakCount[a];
                 }
-                // not only flipped literal makes the clause satisfied but it also doesn't make the clause unsatisfied like before
-                ++_gain[a];
+                else {
+                    for (Literal l : _formula[ind]) {
+                        // all literals when flipped, make clause satisfied
+                        ++_gain[abs(l)];
+                    }
+                    // not only flipped literal makes the clause satisfied but it also doesn't make the clause unsatisfied like before
+                    ++_gain[a];
+                }
             }
         }
     }
 
 public:
-    GSAT(const int maxTries, const int maxSteps) : _maxTries(maxTries), _maxSteps(maxSteps) {}
+    StochasticSAT(const int maxTries, const int maxSteps) : _maxTries(maxTries), _maxSteps(maxSteps) {}
 
     void setFormula(const Formula& formula, const int numVars, const bool useWalk = true, const double threshold = 0.05) {
         _formula = formula;
@@ -231,10 +300,15 @@ public:
         _useWalk = useWalk;
         _threshold = threshold;
         _variableToClauses.resize(numVars + 1);
-        _gain.resize(numVars + 1, 0);
+        if (useWalk) {
+            _breakCount.resize(numVars + 1, 0);
+        }
+        else {
+            _gain.resize(numVars + 1, 0);
+        }
         _trueLiteralsCount.resize(formula.size(), 0);
 
-        for(int i = 0; i < formula.size(); ++i) {
+        for (int i = 0; i < formula.size(); ++i) {
             for (Literal l : formula[i]) {
                 if (l < 0) {
                     _variableToClauses[-l].push_back(-(i+1));
@@ -246,24 +320,24 @@ public:
         }
     }
 
-    Atom chooseVarToFlip() const {
-        if (_useWalk && (rand() / double(RAND_MAX) < _threshold)) {
-            return chooseRandomVar();
-        }
-
-        return chooseVarGain();
-    }
-
     optional<Valuation> solve() {
         Valuation val;
         Atom atom;
-        for(int i = 0; i < _maxTries; ++i) {
+        for (int i = 0; i < _maxTries; ++i) {
             val = initialize();
-            for(int j = 0; j < _maxSteps; ++j) {
-                if(isSatisfied(_formula, val)) {
+            for (int j = 0; j < _maxSteps; ++j) {
+                if (isSatisfied(_formula, val)) {
                     return val;
                 }
-                Atom atom = chooseVarToFlip();
+
+                Atom atom;
+                if (_useWalk) {
+                    atom = chooseVarBreak();
+                }
+                else {
+                    atom = chooseVarGain();
+                }
+
                 flipAtom(atom, val);
             }
         }
@@ -281,11 +355,11 @@ int main() {
         exit(1);
     }
 
-    GSAT gsat(3000, 10000);
-    gsat.setFormula(f, num_of_vars);
+    StochasticSAT ssat(3000, 10000);
+    ssat.setFormula(f, num_of_vars, true, 0.05);
 
-    optional<Valuation> val = gsat.solve();
-    if(val) {
+    optional<Valuation> val = ssat.solve();
+    if (val) {
         cout << "SAT" << endl;
         for (Atom a = 1; a <= num_of_vars; ++a) {
             cout << a << ": " << ((*val)[a] ? "true" : "false") << endl;
