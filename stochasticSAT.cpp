@@ -358,7 +358,10 @@ int main(int argc, char** argv) {
         exit(1);
     }
 
-    StochasticSAT ssat(atoi(argv[1]), atoi(argv[2]));
+    int maxTries = argc > 1 ? atoi(argv[1]) : 1000;
+    int maxSteps = argc > 2 ? atoi(argv[2]) : 1000;
+
+    StochasticSAT ssat(maxTries, maxSteps);
     ssat.setFormula(f, num_of_vars, true, 0.05);
 
     optional<Valuation> val = ssat.solve();
