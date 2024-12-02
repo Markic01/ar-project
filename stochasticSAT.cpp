@@ -349,7 +349,7 @@ public:
     }
 };
 
-int main() {
+int main(int argc, char** argv) {
     std::srand(static_cast<unsigned int>(std::time(0)));
     unsigned num_of_vars;
     Formula f;
@@ -358,7 +358,7 @@ int main() {
         exit(1);
     }
 
-    StochasticSAT ssat(3000, 10000);
+    StochasticSAT ssat(atoi(argv[1]), atoi(argv[2]));
     ssat.setFormula(f, num_of_vars, true, 0.05);
 
     optional<Valuation> val = ssat.solve();
