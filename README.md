@@ -26,7 +26,7 @@ The program:
 2. **Run it**  
    Run the following command to compile:
    ```bash
-   ./stochasticSAT < dimacs.in
+   ./stochasticSAT {maxTries} {maxSteps} < dimacs.in
    ```
 ## Output
 - If the formula is satisfiable and the algorithm finds a solution, the output will look like:
